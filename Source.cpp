@@ -6,7 +6,6 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include <iostream>
-#include <functional>
 
 #include "Shader.h"
 
