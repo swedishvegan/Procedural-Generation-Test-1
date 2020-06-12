@@ -1,0 +1,99 @@
+#version 430 core
+
+layout (local_size_x = 1) in;
+layout (std430, binding = 1) buffer b {
+	float heights[];
+};
+
+uniform vec4 startFinish;
+uniform uvec2 samples;
+uniform uint seed;
+
+float goodFloor(float x) {
+	return (x > 0.0) ? float(int(x)) : float(int(x) - 1);
+}
+float goodCeil(float x) {
+	return (x > 0.0) ? float(int(x) + 1) : float(int(x));
+}
+
+vec2 goodFloor(vec2 v) {
+	return vec2(goodFloor(v.x), goodFloor(v.y));
+}
+vec2 goodCeil(vec2 v) {
+	return vec2(goodCeil(v.x), goodCeil(v.y));
+}
+
+float fadeFunc(float x) { return x * x * x * (x * (x * 6.0 - 15.0) + 10.0); }
+
+uint assign1D(int x, int y) {
+
+	if (x == 0 && y == 0) return 1u;
+
+	int maxCoord = (abs(x) > abs(y)) ? abs(x) : abs(y);
+	uint uMaxCoord = uint(maxCoord);
+	uint idx = maxCoord * 2u - 1u;
+	idx *= idx;
+	if (x == maxCoord && y == -maxCoord) idx += 8u * uMaxCoord;
+	else if (x == maxCoord) idx += uMaxCoord + y;
+	else if (y == maxCoord) idx += 3u * uMaxCoord - x;
+	else if (x == -maxCoord) idx += 5u * uMaxCoord - y;
+	else idx += 7u * uMaxCoord + x;
+	return idx;
+
+}
+
+float hash(uint n) {
+
+	float c = float(n) * 0.618033988;
+	return floor(float(1u << 14u) * (c - floor(c)));
+
+}
+
+vec2 getVec(int x, int y, uint perlinSeed) {
+
+	float angle = hash(perlinSeed + assign1D(x, y));
+	return vec2(cos(angle), sin(angle));
+
+}
+
+vec2 fixCoords(vec2 perlinCoords) {
+	if (perlinCoords.x > 0.0) perlinCoords.x += 1.0;	// I added this in as a lazy bug fix cuz I couldn't 
+	if (perlinCoords.y > 0.0) perlinCoords.y += 1.0;	// figure out what the actual cause was
+	return perlinCoords;
+}
+
+float perlinHeight(vec2 coords, uint perlinSeed) {
+
+	coords = fixCoords(coords);
+	ivec2 iCoords = ivec2(coords);
+
+	vec2 v00 = getVec(iCoords.x, iCoords.y, perlinSeed);
+	vec2 v01 = getVec(iCoords.x, iCoords.y + 1, perlinSeed);
+	vec2 v10 = getVec(iCoords.x + 1, iCoords.y, perlinSeed);
+	vec2 v11 = getVec(iCoords.x + 1, iCoords.y + 1, perlinSeed);
+
+	vec2 f0 = coords - goodFloor(coords);
+	vec2 f1 = coords - goodCeil(coords);
+
+	float dot00 = f0.x * v00.x + f0.y * v00.y;
+	float dot01 = f0.x * v01.x + f1.y * v01.y;
+	float dot10 = f1.x * v10.x + f0.y * v10.y;
+	float dot11 = f1.x * v11.x + f1.y * v11.y;
+
+	float z0 = dot00 + fadeFunc(f0.x) * (dot10 - dot00);
+	float z1 = dot01 + fadeFunc(f0.x) * (dot11 - dot01);
+	return z0 + fadeFunc(f0.y) * (z1 - z0);
+
+}
+
+void main() {
+
+	uint idx = samples.x * gl_WorkGroupID.y + gl_WorkGroupID.x;
+	vec2 pos = startFinish.xy + (startFinish.zw - startFinish.xy) * vec2(gl_WorkGroupID.xy) / vec2(samples - 1u);
+	if (gl_WorkGroupID.y % 4u == 1) pos *= 2.0;
+	else if (gl_WorkGroupID.y % 4u == 2) pos *= 4.0;
+	else if (gl_WorkGroupID.y % 4u == 3) pos *= 24.0;
+	float height = perlinHeight(pos, seed);
+	heights[idx] = height;
+	
+}
